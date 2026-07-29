@@ -66,7 +66,7 @@ def design_halfband(taps: int, beta: float) -> list[float]:
 
 
 def quantize(coefficients: list[float], width: int) -> list[int]:
-    # 18bit係数はGroundlessのFixedPoint::q2_16と揃える。
+    # 18bit係数はgndless_fixedpointのQ2.16と揃える。
     # Q2.(width-2)なら+1.0を正確に表現できる。
     scale = 1 << (width - 2)
     limit = (1 << (width - 1)) - 1

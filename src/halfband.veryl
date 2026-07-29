@@ -1,3 +1,5 @@
+import gndless_fixedpoint::Types::{RoundingMode, OverflowMode};
+
 /// 2倍補間用の固定係数halfband FIR
 ///
 /// `COEFFICIENT_SET`は1段目（103tap）または2段目（39tap）を選ぶ。
@@ -169,13 +171,13 @@ pub module HalfbandInterpolator2x #(
                 }
             } else if state == STATE_MAC {
                 if pair_index == PAIR_COUNT - 1 {
-                    even_sample = fixedpoint::resize::<
+                    even_sample = gndless_fixedpoint::resize::<
                         ACCUMULATOR_WIDTH                                           ,
                         INPUT_FRAC                                                  ,
                         SAMPLE_WIDTH                                                ,
                         OUTPUT_FRAC                                                 ,
-                        fixedpoint::Types::RoundingMode::NEAREST_TIES_AWAY_FROM_ZERO,
-                        fixedpoint::Types::OverflowMode::SATURATE                   ,
+                        RoundingMode::NEAREST_TIES_AWAY_FROM_ZERO,
+                        OverflowMode::SATURATE                   ,
                     >(next_accumulator);
                     accumulator = next_accumulator;
                     state       = STATE_OUTPUT_EVEN;
