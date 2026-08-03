@@ -3,7 +3,7 @@ import gndless_fixedpoint::Types::{RoundingMode, OverflowMode};
 /// 2倍補間用の固定係数halfband FIR
 ///
 /// `COEFFICIENT_SET`は1段目（103tap）または2段目（39tap）を選ぶ。
-/// 係数はQ2.(COEFFICIENT_WIDTH - 2)、入力と出力はQ1.(SAMPLE_WIDTH - 1)とする。
+/// 係数はQ2.16で、入力と出力の小数部位置は`SAMPLE_FRACTION_BITS`で指定する。
 /// halfbandの対称性を使い、非ゼロ係数の対称tapを1回の積和へまとめる。
 /// もう一方のpolyphaseは中心係数が1なので、遅延入力をそのまま出力する。
 ///
@@ -24,11 +24,10 @@ import gndless_fixedpoint::Types::{RoundingMode, OverflowMode};
 ///   head: { text: '2x output burst with backpressure' }
 /// }
 /// ```
-pub module HalfbandInterpolator2x #(
-    param SAMPLE_WIDTH     : u32 = 32                                  , /// 入出力サンプルのビット幅
-    param COEFFICIENT_WIDTH: u32 = 18                                  , /// 係数のビット幅
-    param ACCUMULATOR_WIDTH: u32 = SAMPLE_WIDTH + COEFFICIENT_WIDTH + 8, /// MACアキュムレータのビット幅
-    param COEFFICIENT_SET  : u32 = 1                                   , /// 使用する係数セット (1または2)
+module HalfbandInterpolator2xCore #(
+    param SAMPLE_WIDTH        : u32 = 24              , /// 入出力sampleのbit幅
+    param SAMPLE_FRACTION_BITS: u32 = SAMPLE_WIDTH - 1, /// sampleの小数部bit数
+    param COEFFICIENT_SET     : u32 = 1               , /// 使用する係数セット (1または2)
 ) (
     clk          : input  clock                     , /// システムクロック
     rst          : input  reset                     , /// リセット
@@ -39,13 +38,17 @@ pub module HalfbandInterpolator2x #(
     output_ready : input  bbool                     , /// 出力受理可能
     output_sample: output signed logic<SAMPLE_WIDTH>, /// 補間後の出力サンプル
 ) {
-    const PAIR_COUNT    : u32 = if COEFFICIENT_SET == 1 ? 26 : 10;
-    const HISTORY_LENGTH: u32 = PAIR_COUNT * 2;
-    const DELAY         : u32 = if COEFFICIENT_SET == 1 ? 25 : 9;
-    const INDEX_WIDTH   : u32 = $clog2(PAIR_COUNT);
-    const PRODUCT_WIDTH : u32 = SAMPLE_WIDTH + 1 + COEFFICIENT_WIDTH;
-    const INPUT_FRAC    : u32 = SAMPLE_WIDTH + COEFFICIENT_WIDTH - 3;
-    const OUTPUT_FRAC   : u32 = SAMPLE_WIDTH - 1;
+    const PAIR_COUNT            : u32 = if COEFFICIENT_SET == 1 ? 26 : 10;
+    const HISTORY_LENGTH        : u32 = PAIR_COUNT * 2;
+    const DELAY                 : u32 = if COEFFICIENT_SET == 1 ? 25 : 9;
+    const INDEX_WIDTH           : u32 = $clog2(PAIR_COUNT);
+    const COEFFICIENT_WIDTH     : u32 = gndless_fixedpoint::Q2_16::WIDTH;
+    const COEFFICIENT_FRACTION  : u32 = gndless_fixedpoint::Q2_16::FRACTION_BITS;
+    const PRODUCT_WIDTH         : u32 = SAMPLE_WIDTH + 1 + COEFFICIENT_WIDTH;
+    const ACCUMULATOR_GUARD_BITS: u32 = 2;
+    const ACCUMULATOR_WIDTH     : u32 = PRODUCT_WIDTH + $clog2(PAIR_COUNT) + ACCUMULATOR_GUARD_BITS;
+    const INPUT_FRAC            : u32 = SAMPLE_FRACTION_BITS + COEFFICIENT_FRACTION;
+    const OUTPUT_FRAC           : u32 = SAMPLE_FRACTION_BITS;
 
     const STATE_IDLE       : logic<2> = 2'd0;
     const STATE_MAC        : logic<2> = 2'd1;
@@ -65,7 +68,7 @@ pub module HalfbandInterpolator2x #(
 
     function coefficient (
         index: input logic<INDEX_WIDTH>,
-    ) -> signed logic<COEFFICIENT_WIDTH> {
+    ) -> gndless_fixedpoint::Q2_16::Raw {
         if COEFFICIENT_SET == 1 {
             return case index {
                 0      : -18'sd2,
@@ -172,10 +175,10 @@ pub module HalfbandInterpolator2x #(
             } else if state == STATE_MAC {
                 if pair_index == PAIR_COUNT - 1 {
                     even_sample = gndless_fixedpoint::resize::<
-                        ACCUMULATOR_WIDTH                                           ,
-                        INPUT_FRAC                                                  ,
-                        SAMPLE_WIDTH                                                ,
-                        OUTPUT_FRAC                                                 ,
+                        ACCUMULATOR_WIDTH                        ,
+                        INPUT_FRAC                               ,
+                        SAMPLE_WIDTH                             ,
+                        OUTPUT_FRAC                              ,
                         RoundingMode::NEAREST_TIES_AWAY_FROM_ZERO,
                         OverflowMode::SATURATE                   ,
                     >(next_accumulator);
@@ -198,7 +201,38 @@ pub module HalfbandInterpolator2x #(
     }
 }
 
-/// 2倍補間器のburst、出力保持、入力受理を検証
+/// format付きstream interfaceを使う2倍halfband補間器
+///
+/// `FORMAT`はsample幅と小数部位置を一体で指定する。既定のQ2.23はASRC処理中の1bit headroomを確保し、係数Q2.16との最初の積を26x18に保つ
+pub module HalfbandInterpolator2x::<FORMAT: gndless_fixedpoint::SignedFixedPointFormat = gndless_fixedpoint::Q2_23> #(
+    param COEFFICIENT_SET: u32 = 1, /// 使用する係数セット (1または2)
+) (
+    clk          : input   clock                                                    ,
+    rst          : input   reset                                                    ,
+    input_valid  : input   bbool                                                    ,
+    input_ready  : output  bbool                                                    ,
+    input_sample : modport gndless_fixedpoint::FixedPointPort::<FORMAT>::input_port ,
+    output_valid : output  bbool                                                    ,
+    output_ready : input   bbool                                                    ,
+    output_sample: modport gndless_fixedpoint::FixedPointPort::<FORMAT>::output_port,
+) {
+    inst core: HalfbandInterpolator2xCore #(
+        SAMPLE_WIDTH        : FORMAT::WIDTH        ,
+        SAMPLE_FRACTION_BITS: FORMAT::FRACTION_BITS,
+        COEFFICIENT_SET     : COEFFICIENT_SET      ,
+    ) (
+        clk                             ,
+        rst                             ,
+        input_valid                     ,
+        input_ready                     ,
+        input_sample : input_sample.raw ,
+        output_valid                    ,
+        output_ready                    ,
+        output_sample: output_sample.raw,
+    );
+}
+
+/// 2倍補間器coreのburst、出力保持、入力受理を検証
 #[test(test_halfband_interpolator2x_stream)]
 module test_halfband_interpolator2x_stream {
     inst clk: $tb::clock_gen;
@@ -211,7 +245,7 @@ module test_halfband_interpolator2x_stream {
     var output_ready : bbool           ;
     var output_sample: signed logic<16>;
 
-    inst dut: HalfbandInterpolator2x #(
+    inst dut: HalfbandInterpolator2xCore #(
         SAMPLE_WIDTH   : 16,
         COEFFICIENT_SET: 2 ,
     ) (
@@ -268,6 +302,66 @@ module test_halfband_interpolator2x_stream {
                 $assert(output_sample == 16'sd1000, "DC input must preserve the odd output");
             }
             clk.next(1);
+        }
+        $finish();
+    }
+}
+
+/// Q2.23 wrapperでDC gainとfull-scale近傍の小数部位置を検証
+#[test(test_halfband_interpolator2x_q2_23)]
+module test_halfband_interpolator2x_q2_23 {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+
+    var input_valid: bbool;
+    var input_ready: bbool;
+    inst input_sample: gndless_fixedpoint::FixedPointPort::<gndless_fixedpoint::Q2_23>;
+    var output_valid: bbool;
+    var output_ready: bbool;
+    inst output_sample: gndless_fixedpoint::FixedPointPort::<gndless_fixedpoint::Q2_23>;
+
+    inst dut: HalfbandInterpolator2x #(
+        COEFFICIENT_SET: 2,
+    ) (
+        clk            ,
+        rst            ,
+        input_valid    ,
+        input_ready    ,
+        input_sample   ,
+        output_valid   ,
+        output_ready   ,
+        output_sample  ,
+    );
+
+    initial {
+        input_valid      = false;
+        input_sample.raw = gndless_fixedpoint::Q2_23::MAX;
+        output_ready     = false;
+        rst.assert();
+
+        for sample_index in 0..19 {
+            $assert(input_ready, "Q2.23 halfband must accept input while idle");
+            input_valid = true;
+            clk.next();
+            input_valid = false;
+            clk.next(10);
+            $assert(output_valid, "Q2.23 halfband must emit each burst");
+            if sample_index == 18 {
+                $assert(
+                    output_sample.raw == gndless_fixedpoint::Q2_23::MAX,
+                    "Q2.23 even DC gain or fraction position mismatch",
+                );
+            }
+            output_ready = true;
+            clk.next();
+            if sample_index == 18 {
+                $assert(
+                    output_valid && output_sample.raw == gndless_fixedpoint::Q2_23::MAX,
+                    "Q2.23 odd DC gain or fraction position mismatch",
+                );
+            }
+            clk.next();
+            output_ready = false;
         }
         $finish();
     }

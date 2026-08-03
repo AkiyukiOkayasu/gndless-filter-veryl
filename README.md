@@ -4,6 +4,6 @@ CIC、2倍halfband、shift型LPF/HPFを所有します。CIC/halfband/shift filt
 
 公開APIは`CicDecimator`、`CicInterpolator`、`HalfbandInterpolator2x`、`LpfShift*`、`HpfShift*`です。halfbandの固定小数点幅変換に`fixedpoint`を使用します。
 
-現行APIはraw signed/unsignedの入出力を使い、format generic化は行っていません。CICの内部accumulator幅、decimation/interpolation比、halfbandの係数・burst/enable契約、shift量と出力切り詰めは各module doc commentを正とします。clock/resetは同期、streamは`enable`で進み、stall中は状態を保持します。
+`HalfbandInterpolator2x`は`FixedPointPort::<FORMAT>`でsample formatを受け、既定はQ2.23です。内部の係数はQ2.16、FIFO/historyは`FORMAT::Raw`で処理します。CICとshift filterは従来どおりraw signed/unsignedの入出力です。CICの内部accumulator幅、decimation/interpolation比、halfbandの係数・burst/enable契約、shift量と出力切り詰めは各module doc commentを正とします。clock/resetは同期、streamは`enable`で進み、stall中は状態を保持します。
 
 検証: `veryl fmt --check && veryl check && veryl test && veryl build && veryl doc`。係数設計ツールは`tools/design_halfband_coefficients.py`です。
