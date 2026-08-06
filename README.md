@@ -1,9 +1,9 @@
 # gndless_filter
 
-CIC、2倍halfband、shift型LPF/HPFを所有します。CIC/halfband/shift filterを個別packageへ分割せず、audio rate変換用filter群として管理します。
+レートを変えない（1:1）ビットシフト型一次LPF/HPFを所有します。乗算器を使わずシフト演算のみで実装します。レート変換系moduleは`gndless_sample_rate_conversion`、数学的補間kernelは`gndless_interpolation`が担当し、このpackageは1:1レートのフィルタに限定します。
 
-公開APIは`CicDecimator`、`CicInterpolator`、`HalfbandInterpolator2x`、`LpfShift*`、`HpfShift*`です。halfbandの固定小数点幅変換に`fixedpoint`を使用します。
+公開APIは`LpfShiftSigned`、`LpfShiftVariableSigned`、`LpfShiftUnsigned`、`LpfShiftVariableUnsigned`、`HpfShiftSigned`、`HpfShiftVariableSigned`、`HpfShiftUnsigned`、`HpfShiftVariableUnsigned`です。
 
-`HalfbandInterpolator2x`は`FixedPointValue::<FORMAT>`でsample formatを受け、既定はQ2.23です。内部の係数はQ2.16、FIFO/historyは`FORMAT::Raw`で処理します。CICとshift filterは従来どおりraw signed/unsignedの入出力です。CICの内部accumulator幅、decimation/interpolation比、halfbandの係数・burst/enable契約、shift量と出力切り詰めは各module doc commentを正とします。clock/resetは同期、valid/readyのstall中は状態を保持します。
+全moduleはraw signed/unsignedの入出力で、レートは1:1です。`enable`がHighのときだけ状態を更新します。カットオフ周波数の近似式`fc ≈ fs / (2π * 2^SHIFT)`と、`SHIFT`/`shift`の契約は各module doc commentを正とします。
 
-検証: `veryl fmt --check && veryl check && veryl test && veryl build && veryl doc`。係数設計ツールは`tools/design_halfband_coefficients.py`です。
+検証: `veryl fmt --check && veryl check && veryl test && veryl build && veryl doc`。

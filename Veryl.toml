@@ -2,7 +2,7 @@
 name = "gndless_filter"
 version = "0.2.0"
 authors = ["Akiyuki Okayasu"]
-description = "Audio-rate CIC, halfband, and shift-based filters for Veryl."
+description = "Shift-based first-order LPF/HPF filters (1:1 rate) for Veryl."
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/AkiyukiOkayasu/gndless-filter-veryl"
 
