@@ -104,7 +104,8 @@ module test_soft_fade {
 
     always_ff (clk, rst) {
         if_reset {
-            win_cnt = 0;
+            pass_count = 0;
+            win_cnt    = 0;
         } else {
             if y[0].raw == x[0].raw {
                 pass_count = pass_count + 1;
