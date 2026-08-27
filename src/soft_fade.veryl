@@ -1,4 +1,5 @@
 import gndless_fixedpoint::FixedPointValue;
+import gndless_fixedpoint::SignedFixedPointFormat;
 import gndless_fixedpoint::Q4_23;
 
 /// dutyディザによる線形フェードイン(ソフトミュート)モジュール
@@ -10,7 +11,7 @@ import gndless_fixedpoint::Q4_23;
 ///
 /// フェード時間は WINDOW * WINDOW / FADE_STEP クロック。
 /// 例: clk=50MHz, WINDOW=1024, FADE_STEP=2 → 約10.5ms。
-pub module SoftFade::<FORMAT: gndless_fixedpoint::SignedFixedPointFormat = Q4_23> #(
+pub module SoftFade::<FORMAT: SignedFixedPointFormat = Q4_23> #(
     param CHANNELS : u32 = 2   , /// チャンネル数
     param WINDOW   : u32 = 1024, /// ディザ窓長(クロック)。トグル周波数 = clk/WINDOW
     param FADE_STEP: u32 = 2   , /// 窓あたりのduty増分。duty最大はWINDOW
