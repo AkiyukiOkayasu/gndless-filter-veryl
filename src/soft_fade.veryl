@@ -4,9 +4,9 @@ import gndless_fixedpoint::Q4_23;
 
 /// dutyディザによる線形フェードイン(ソフトミュート)モジュール
 ///
-/// `fade_in`がLowの間は出力を0に保持する。Highへ立ち上げると、窓内位置
-/// `fade_pos`がduty(`fade_duty`)未満の間だけ入力を通過させ、平均ゲインを
-/// duty/窓で線形に0→1へ増加させる。乗算器を使わないためDSP資源を消費しない。
+/// `fade_in`がLowの間は出力を0に保持する。
+/// Highへ立ち上げると、窓内位置`fade_pos`がduty(`fade_duty`)未満の間だけ入力を通過させ、平均ゲインをduty/窓で線形に0→1へ増加させる。
+/// 乗算器を使わないためDSP資源を消費しない。
 /// 通過/遮断のトグル周波数は clk/WINDOW で、PWMノイズは帯域外になる。
 ///
 /// フェード時間は WINDOW * WINDOW / FADE_STEP クロック。
@@ -30,8 +30,7 @@ pub module SoftFade::<FORMAT: SignedFixedPointFormat = Q4_23> #(
     var fade_duty: logic<DUTY_WIDTH>;
     var fade_on  : logic            ;
 
-    // Gowin合成はprocedural forでinterface配列要素を定数選択できないため、
-    // generate assignでplain配列へコピーして使う。
+    // Gowin合成はprocedural forでinterface配列要素を定数選択できないため、generate assignでplain配列へコピーして使う。
     var x_raw: FORMAT::Raw [CHANNELS];
     for channel in 0..CHANNELS :g_x {
         assign x_raw[channel] = x[channel].raw;
