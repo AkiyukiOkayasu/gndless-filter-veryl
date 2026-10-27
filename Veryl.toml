@@ -1,6 +1,6 @@
 [project]
 name = "gndless_filter"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Akiyuki Okayasu"]
 description = "Shift-based first-order LPF/HPF filters (1:1 rate) for Veryl."
 license = "MIT OR Apache-2.0"
