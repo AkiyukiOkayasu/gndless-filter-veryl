@@ -1,6 +1,9 @@
+import gndless_fixedpoint::saturate;
+
 /// ビットシフトによる一次ハイパスフィルタ (符号付き版)。
 /// LPFの出力を入力から減算してHPFを構成: y[n] = x[n] - lpf[n]。
 /// 内部でLpfShiftSignedをインスタンスして使用する。
+/// x - lpf_out が出力幅を超える場合はsigned範囲へ飽和する。
 ///
 /// カットオフ周波数の近似:
 ///   fc ≈ fs / (2π * 2^SHIFT)。
@@ -17,6 +20,8 @@ pub module HpfShiftSigned #(
     x     : input  signed logic<DATA_WIDTH>, /// 入力サンプル (符号付き)
     y     : output signed logic<DATA_WIDTH>, /// フィルタ出力 (符号付き)
 ) {
+    const DIFF_WIDTH: u32 = DATA_WIDTH + 1;
+
     var lpf_out: signed logic<DATA_WIDTH>;
 
     inst lpf: LpfShiftSigned #(
@@ -31,12 +36,14 @@ pub module HpfShiftSigned #(
     );
 
     always_comb {
-        y = x - lpf_out;
+        let diff: signed logic<DIFF_WIDTH> = $signed({x[msb], x}) - $signed({lpf_out[msb], lpf_out});
+        y    = saturate::<DIFF_WIDTH, DATA_WIDTH>(diff);
     }
 }
 
 /// 可変シフト量に対応したHPF (符号付き版)。
 /// 実行時にシフト量を変更できる。
+/// x - lpf_out が出力幅を超える場合はsigned範囲へ飽和する。
 ///
 /// 伝達関数:
 ///   y[n] = x[n] - lpf[n]。
@@ -53,6 +60,8 @@ pub module HpfShiftVariableSigned #(
     x     : input  signed logic<DATA_WIDTH>, /// 入力サンプル (符号付き)
     y     : output signed logic<DATA_WIDTH>, /// フィルタ出力 (符号付き)
 ) {
+    const DIFF_WIDTH: u32 = DATA_WIDTH + 1;
+
     var lpf_out: signed logic<DATA_WIDTH>;
 
     inst lpf: LpfShiftVariableSigned #(
@@ -69,7 +78,8 @@ pub module HpfShiftVariableSigned #(
     );
 
     always_comb {
-        y = x - lpf_out;
+        let diff: signed logic<DIFF_WIDTH> = $signed({x[msb], x}) - $signed({lpf_out[msb], lpf_out});
+        y    = saturate::<DIFF_WIDTH, DATA_WIDTH>(diff);
     }
 }
 
@@ -253,6 +263,44 @@ module test_hpf_shift_ac {
         // 交番信号ではHPF出力が大きい (入力をそのまま通過させる)
         $assert(y != 16'sd0);
 
+        $finish();
+    }
+}
+
+/// 符号付きHPFがフルスケールの符号反転で飽和することを検証
+///
+/// x - lpf_out は出力幅を超え得るため、signed範囲への飽和が必要になる。
+#[test(test_hpf_shift_signed_full_scale)]
+module test_hpf_shift_signed_full_scale {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+
+    const DATA_WIDTH: u32 = 16;
+    const SHIFT     : u32 = 4;
+
+    var enable: bbool                   ;
+    var x     : signed logic<DATA_WIDTH>;
+    var y     : signed logic<DATA_WIDTH>;
+
+    inst dut: HpfShiftSigned #( DATA_WIDTH, SHIFT ) ( clk, rst, enable, x, y );
+
+    initial {
+        enable = false;
+        x      = 0;
+        rst.assert();
+
+        x      = 16'sd32767;
+        enable = true;
+        clk.next(2000);
+        $assert(y <: 16'sd16 && y >: -16'sd16, "HPF must settle to zero at positive DC");
+
+        x = 16'sh8000;
+        clk.next(1);
+        $assert(y <: 16'sd0, "HPF must saturate negative on a full-scale sign reversal");
+        $assert(y == 16'sh8000, "HPF must saturate to the signed minimum");
+
+        clk.next(2000);
+        $assert(y <: 16'sd16 && y >: -16'sd16, "HPF must settle to zero at negative DC");
         $finish();
     }
 }

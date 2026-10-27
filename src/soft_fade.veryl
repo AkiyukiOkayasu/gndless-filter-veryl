@@ -11,10 +11,11 @@ import gndless_fixedpoint::Q4_23;
 ///
 /// フェード時間は WINDOW * WINDOW / FADE_STEP クロック。
 /// 例: clk=50MHz, WINDOW=1024, FADE_STEP=2 → 約10.5ms。
+/// `CHANNELS`と`WINDOW`は1以上、`FADE_STEP`は1以上を指定する。
 pub module SoftFade::<FORMAT: SignedFixedPointFormat = Q4_23> #(
-    param CHANNELS : u32 = 2   , /// チャンネル数
-    param WINDOW   : u32 = 1024, /// ディザ窓長(クロック)。トグル周波数 = clk/WINDOW
-    param FADE_STEP: u32 = 2   , /// 窓あたりのduty増分。duty最大はWINDOW
+    param CHANNELS : u32 = 2   , /// チャンネル数 (1以上)
+    param WINDOW   : u32 = 1024, /// ディザ窓長(クロック、1以上)。トグル周波数 = clk/WINDOW
+    param FADE_STEP: u32 = 2   , /// 窓あたりのduty増分 (1以上)。duty最大はWINDOW
 ) (
     clk    : input   clock                                            , /// システムクロック
     rst    : input   reset                                            , /// リセット
@@ -23,8 +24,8 @@ pub module SoftFade::<FORMAT: SignedFixedPointFormat = Q4_23> #(
     y      : modport FixedPointValue::<FORMAT>::output_port [CHANNELS], /// 出力
 ) {
     const DUTY_MAX  : u32 = WINDOW;
-    const POS_WIDTH : u32 = $clog2(WINDOW);
-    const DUTY_WIDTH: u32 = $clog2(WINDOW + 1);
+    const POS_WIDTH : u32 = $std::max::<u32>($clog2(WINDOW), 1);
+    const DUTY_WIDTH: u32 = $std::max::<u32>($clog2(WINDOW + 1), 1);
 
     var fade_pos : logic<POS_WIDTH> ;
     var fade_duty: logic<DUTY_WIDTH>;
@@ -158,6 +159,46 @@ module test_soft_fade {
         fade_in = false;
         clk.next(2);
         $assert(y[0].raw == 27'sd0, "fade_in Low must mute immediately");
+        $finish();
+    }
+}
+
+/// 最小窓長と1ch構成でゼロ幅カウンタやduty飽和が起きないことを検証
+#[test(test_soft_fade_min_window)]
+module test_soft_fade_min_window {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+
+    var fade_in: bbool;
+    inst x: FixedPointValue::<Q4_23> [1];
+    inst y: FixedPointValue::<Q4_23> [1];
+
+    inst dut: SoftFade::<Q4_23> #(
+        CHANNELS : 1,
+        WINDOW   : 1,
+        FADE_STEP: 1,
+    ) (
+        clk    : clk    ,
+        rst    : rst    ,
+        fade_in: fade_in,
+        x      : x      ,
+        y      : y      ,
+    );
+
+    initial {
+        fade_in  = false;
+        x[0].raw = Q4_23::ONE;
+        rst.assert();
+        clk.next(2);
+        $assert(y[0].raw == Q4_23::ZERO, "minimum window must start muted");
+
+        fade_in = true;
+        clk.next(2);
+        $assert(y[0].raw == Q4_23::ONE, "minimum window must reach pass-through");
+
+        fade_in = false;
+        clk.next(2);
+        $assert(y[0].raw == Q4_23::ZERO, "minimum window must mute again");
         $finish();
     }
 }

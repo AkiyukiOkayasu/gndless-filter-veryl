@@ -38,9 +38,13 @@ pub module LpfShiftSigned #(
         } else if enable {
             // y[n] = y[n-1] + (x[n] - y[n-1]) >> SHIFT
             // acc は小数部を保持する拡張アキュムレータ
-            let diff : signed logic<ACC_WIDTH> = x_ext - acc;
-            let delta: signed logic<ACC_WIDTH> = diff >>> SHIFT; // 算術右シフト
-            acc   = acc + delta;
+            // 逆符号のフルスケール入力でも差分がwrapしないよう、差分と加算を1bit広く計算する。
+            let x_ext_s : signed logic<ACC_WIDTH + 1> = $signed({x_ext[msb], x_ext});
+            let acc_s   : signed logic<ACC_WIDTH + 1> = $signed({acc[msb], acc});
+            let diff    : signed logic<ACC_WIDTH + 1> = x_ext_s - acc_s;
+            let delta   : signed logic<ACC_WIDTH + 1> = diff >>> SHIFT; // 算術右シフト
+            let next_acc: signed logic<ACC_WIDTH + 1> = acc_s + delta;
+            acc      = next_acc[ACC_WIDTH - 1:0];
         }
     }
 
@@ -84,9 +88,13 @@ pub module LpfShiftVariableSigned #(
         if_reset {
             acc = 0;
         } else if enable {
-            let diff : signed logic<ACC_WIDTH> = x_ext - acc;
-            let delta: signed logic<ACC_WIDTH> = diff >>> shift; // 可変シフト
-            acc   = acc + delta;
+            // 可変シフトでも逆符号のフルスケール入力で差分がwrapしないよう、1bit広く計算する。
+            let x_ext_s : signed logic<ACC_WIDTH + 1> = $signed({x_ext[msb], x_ext});
+            let acc_s   : signed logic<ACC_WIDTH + 1> = $signed({acc[msb], acc});
+            let diff    : signed logic<ACC_WIDTH + 1> = x_ext_s - acc_s;
+            let delta   : signed logic<ACC_WIDTH + 1> = diff >>> shift; // 可変シフト
+            let next_acc: signed logic<ACC_WIDTH + 1> = acc_s + delta;
+            acc      = next_acc[ACC_WIDTH - 1:0];
         }
     }
 
@@ -290,6 +298,83 @@ module test_lpf_shift_negative {
         clk.next(1000);
         $display("y final = %d (expected ~-500)", y);
         $assert(y >: -16'sd550 && y <: -16'sd450, "LPF出力が負の目標値に収束していません");
+
+        $finish();
+    }
+}
+
+/// 符号付きLPFがフルスケールの符号反転に追従することを検証
+///
+/// 差分をACC_WIDTHで計算すると、+MAXへ収束後の-MIN入力で差分がwrapし、出力が負方向へ動かない。
+#[test(test_lpf_shift_signed_full_scale)]
+module test_lpf_shift_signed_full_scale {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+
+    const DATA_WIDTH: u32 = 16;
+    const SHIFT     : u32 = 4;
+
+    var enable: bbool                   ;
+    var x     : signed logic<DATA_WIDTH>;
+    var y     : signed logic<DATA_WIDTH>;
+
+    inst fixed_dut: LpfShiftSigned #( DATA_WIDTH, SHIFT ) ( clk, rst, enable, x, y );
+
+    initial {
+        enable = false;
+        x      = 0;
+        rst.assert();
+
+        x      = 16'sd32767;
+        enable = true;
+        clk.next(2000);
+        $assert(y >: 16'sd32000, "fixed LPF must settle at positive full scale");
+
+        x = 16'sh8000;
+        clk.next(200);
+        $assert(y <: 16'sd0, "fixed LPF must move negative after a full-scale sign reversal");
+
+        clk.next(2000);
+        $assert(y <: -16'sd32000, "fixed LPF must settle at negative full scale");
+
+        $finish();
+    }
+}
+
+/// 可変シフト符号付きLPFがフルスケールの符号反転に追従することを検証
+#[test(test_lpf_shift_variable_signed_full_scale)]
+module test_lpf_shift_variable_signed_full_scale {
+    inst clk: $tb::clock_gen;
+    inst rst: $tb::reset_gen ( clk );
+
+    const DATA_WIDTH: u32 = 16;
+    const MAX_SHIFT : u32 = 4;
+    const SHIFT_BITS: u32 = $clog2(MAX_SHIFT + 1);
+
+    var enable: bbool                   ;
+    var shift : logic       <SHIFT_BITS>;
+    var x     : signed logic<DATA_WIDTH>;
+    var y     : signed logic<DATA_WIDTH>;
+
+    inst dut: LpfShiftVariableSigned #( DATA_WIDTH, MAX_SHIFT, SHIFT_BITS ) ( clk, rst, enable, shift, x, y );
+
+    initial {
+        enable = false;
+        shift  = 4;
+        x      = 0;
+        rst.assert();
+
+        x      = 16'sd32767;
+        enable = true;
+        clk.next(2000);
+        $assert(y >: 16'sd32000, "variable LPF must settle at positive full scale");
+
+        x = 16'sh8000;
+        clk.next(200);
+        $assert(y <: 16'sd0, "variable LPF must move negative after a full-scale sign reversal");
+
+        clk.next(2000);
+        $assert(y <: -16'sd32000, "variable LPF must settle at negative full scale");
 
         $finish();
     }
